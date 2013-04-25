@@ -6,6 +6,7 @@
 # backup pool to another pool
 # -h help page
 
+
 # Path to binaries used 
 ZPOOL="/sbin/zpool"
 ZFS="/sbin/zfs"
@@ -22,7 +23,7 @@ TR="/usr/bin/tr"
 CURRENT_DATE=`${DATE} +"%Y%m%H%M"`
 
 # backup pools
-BACKUP_POOLS=(hure usbstick bla)
+BACKUP_POOLS=(usbstick bla)
 
 # property used to check if auto updates should be made or not
 SNAPSHOT_PROPERTY_NAME="ch.espen:auto-backup"
@@ -41,6 +42,29 @@ do
 		;;
 	esac
 done
+
+function run_cmd() {
+	if [ "$vflag" ]; then
+		echo "$2"
+	fi
+	if [ "$pflag" ]; then
+		echo "command: $1"
+	else
+		eval $1
+		ret=$?
+		if [[ $ret -eq 0 ]]
+		then
+			if [ "$vflag" ]; then
+				echo "Successfully ran [ $1 ]"
+			fi
+		else
+			if [ "$vflag" ]; then
+				echo "Error: Command [ $1 ] returned $ret"
+			fi
+			return $ret
+ 	   	fi
+	fi
+}
 
 # available pools for backup: zpool list - excludes 
 ALLPOOLS=(`${ZPOOL} list | ${TAIL} -n +2 | ${CUT} -d' ' -f1 | tr '\n' ' '`); 
@@ -113,47 +137,22 @@ for pool in ${AVAILABLE_BACKUP_POOLS}; do
 			fi
 
 			if [ ! $(containsElement ${PATH} "${BACKUP_FILESYSTEMS[@]}") ];then
-				if [ "$vflag" ]; then
-					echo "creating filesystem: ${pool}/${PATH}"
-				fi
-				if [ "$pflag" ]; then
-					echo "${ZFS} create ${pool}/${PATH}"
-				else
-					`${ZFS} create ${pool}/${PATH}`
-				fi
+				run_cmd "${ZFS} create ${pool}/${PATH}" "creating filesystem ${pool}/${PATH}"
 			fi
 			first=false;
 		done
 
-		if [ "$vflag" ]; then
-			echo "creating snapshot ${fs}@${SNAPSHOT_LABEL}" 
-		fi
-		if [ "$pflag" ]; then
-			echo "${ZFS} snapshot ${fs}@${SNAPSHOT_LABEL}"
-		else
-			`${ZFS} snapshot ${fs}@${SNAPSHOT_LABEL}`
-		fi
+		run_cmd "${ZFS} snapshot ${fs}@${SNAPSHOT_LABEL}" "creating snapshot ${fs}@${SNAPSHOT_LABEL}"
 
 		if [ ${#SNAPSHOT_LIST[@]} = 0 ]; then
-			if [ "$vflag" ]; then
-                                echo "sending initial snapshot ${fs}@${SNAPSHOT_LABEL} to ${pool}/${fs}"
-                        fi
-	                if [ "$pflag" ]; then
-        	                echo "${ZFS} send ${fs}@${SNAPSHOT_LABEL} | zfs recv ${pool}/${fs}"
-                	else
-				`${ZFS} send ${fs}@${SNAPSHOT_LABEL} | zfs recv ${pool}/${fs}`
-			fi
+			run_cmd "${ZFS} send ${fs}@${SNAPSHOT_LABEL} | ${ZFS} recv ${pool}/${fs}" "sending initial snapshot ${fs}@${SNAPSHOT_LABEL} to ${pool}/${fs}"
 		else
 			for snapshot in ${SNAPSHOT_LIST}; do
-                        	if [ "$vflag" ]; then
-                                	echo "sending incremental snapshot ${fs}@${snapshot} ${fs}@${SNAPSHOT_LABEL} to ${pool}/${fs}"
-                        	fi
-                        	if [ "$pflag" ]; then
-                                	echo "${ZFS} send -i ${fs}@${snapshot} ${fs}@${SNAPSHOT_LABEL} | zfs recv ${pool}/${fs}"
-                        	else
-                                	`${ZFS} send -i ${fs}@${snapshot} ${fs}@${SNAPSHOT_LABEL} | zfs recv ${pool}/${fs}`
-					# break if successful!!
-                        	fi			
+				run_cmd "${ZFS} send -i ${snapshot} ${fs}@${SNAPSHOT_LABEL} | ${ZFS} recv ${pool}/${fs}" \
+					 "sending incremental ${snapshot} snapshot ${fs}@${SNAPSHOT_LABEL} to ${pool}/${fs}"
+				if [ "$?" = "0" ]; then
+					break
+				fi
 			done
 		fi
 	done
