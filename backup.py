@@ -16,6 +16,23 @@ SNAPSHOT_PROPERTY_VALUE="true"
 
 DATE = time.strftime("%Y%m%d%H%M", time.localtime())
 
+LABEL = "{}_{}".format
+
+ZPOOL_LIST = "zpool list -H -o name"
+ZPOOL_IMPORT = "zpool import {}".format
+ZPOOL_EXPORT = "zpool export {}".format
+
+ZFS_LIST_FILESYSTEMS = "zfs list -H -r -o name {}".format
+ZFS_LIST_SNAPSHOTS = "zfs list -H -t snapshot -o name -s creation -r {}".format
+
+ZFS_GET_PROPERTY = "zfs get -H -o value {} {}".format
+ZFS_SNAPSHOT = "{}@{}".format
+ZFS_CREATE_SNAPSHOT = "zfs snapshot {}".format
+
+ZFS_SEND = "zfs send {}".format
+ZFS_SEND_INCREMENTAL = "zfs send -i {} {}".format
+ZFS_RECEIVE = "zfs recv {}/{}".format
+
 global options
 
 def main():
@@ -42,75 +59,103 @@ def main():
 
     logging.basicConfig(level=loglevel)
 
+    for pool in BACKUP_POOLS:
+        importPool(pool)
+
     allPools = getPools()
     backupPools = list(set(allPools).intersection( set(BACKUP_POOLS) ))
-    logging.info("available backup pools: %s", " ".join(backupPools))
+    logging.debug("available backup pools: %s", " ".join(backupPools))
 
     pools = [x for x in allPools if x not in backupPools]
-    logging.info("pools to backup: %s", " ".join(pools))
+    logging.debug("pools to backup: %s", " ".join(pools))
     
     backup(pools, backupPools)
 
 def backup(pools, backupPools):
     for backupPool in backupPools:
-        label = backupPool + "_" + DATE
     
         for pool in pools:
-            filesystems = [fs for fs in getFilesystems(pool) if hasProperty(fs, SNAPSHOT_PROPERTY_NAME)]
+            filesystems = [fs for fs in getFilesystems(pool) if getProperty(fs, SNAPSHOT_PROPERTY_NAME)=="true"]
             logging.info("backing up following filesystems from pool %s to backup pool %s: %s", pool, backupPool, " ".join(filesystems))
             for fs in filesystems:
                 createFilesystem(backupPool, fs)
                 snapshots = [s for s in getSnapshots(fs) if backupPool in s]
-                newSnapshot = createSnapshot(fs, label)
+                newSnapshot = createSnapshot(fs, LABEL(backupPool, DATE))
+                if not newSnapshot:
+                    continue
                 if not snapshots:
                     doBackup(backupPool, fs, newSnapshot)
                 else:
                     for snapshot in snapshots:
-                        doIncrementalBackup(backupPool, fs, newSnapshot, snapshot)
+                        returncode = doIncrementalBackup(backupPool, fs, newSnapshot, snapshot)
+                        if returncode == 0:
+                            break
+        exportPool(backupPool)
 
 def doBackup(destPool, filesystem, snapshot):
     logging.info("creating initial backup of %s to %s", snapshot, destPool)
-    command1 = "zfs send " + snapshot
-    command2 = "zfs recv " + destPool + "/" + filesystem
-    pipeCommands(command1, command2, options.pretend)
+    return pipeCommands(ZFS_SEND(snapshot), ZFS_RECEIVE(destPool, filesystem), options.pretend)
 
 def doIncrementalBackup(destPool, filesystem, newSnapshot, snapshot):
     logging.info("creating incremental backup of %s to %s based on %s", newSnapshot, destPool, snapshot)
-    command1 = "zfs send -i " + snapshot + " " + newSnapshot
-    command2 = "zfs recv " + destPool + "/" + filesystem
-    pipeCommands(command1, command2, options.pretend)
+    return pipeCommands(ZFS_SEND_INCREMENTAL(snapshot, newSnapshot), ZFS_RECEIVE(destPool, filesystem), options.pretend)
 
-def createSnapshot(fs, label):
+def createSnapshot(fs, name):
     logging.info("creating snapshot for %s", fs)
-    snapshot = fs + "@" + label
-    command = "zfs snapshot " + snapshot
-    runCommand(command, options.pretend)
-    return snapshot
+    snapshot = ZFS_SNAPSHOT(fs, name)
+    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_CREATE_SNAPSHOT(snapshot), options.pretend)
+    if returncode > 0:
+        logging.error("Failed to create snapshot %s: %s", snapshot, stderrdata)
+        return None
+    else:
+        return snapshot
 
 def getPools():
-    command = "zpool list"
-    pools = [line.split(" ")[0] for line in runCommand(command).readlines()[1:]]
-    logging.info("pools available in system: %s", " ".join(pools))
+    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_LIST)
+    if returncode > 0:
+        logging.error("Failed to retrieve pools: %s", stderrdata)
+    pools = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
+    logging.debug("pools available in system: %s", " ".join(pools))
 
     return pools
 
+def importPool(pool):
+    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_IMPORT(pool), options.pretend)
+    if returncode > 0:
+        logging.info("could not import pool %s: %s", pool, stderrdata)
+    else:
+        logging.info("%s imported", pool)
+
+def exportPool(pool):   
+    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_EXPORT(pool), options.pretend)
+    if returncode > 0:
+        logging.info("could not export pool %s: %s", pool, stderrdata)
+    else:
+        logging.info("%s exported", pool)
+
 def getFilesystems(pool):
-    command = "zfs list -r " + pool
-    filesystems = [line.split()[0] for line in runCommand(command).readlines()[1:]]
+    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_LIST_FILESYSTEMS(pool))
+    filesystems = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
+    if returncode > 0:
+        logging.error("could not get filesystems for %s", pool)
+        return []
+    else:
+        filesystems = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
+        logging.debug("filesystems in pool %s: \n%s", pool, "\n".join(filesystems))
+        return filesystems
 
-    logging.debug("filesystems in pool %s: \n%s", pool, "\n".join(filesystems))
-    return filesystems
-
-def hasProperty(filesystem, property):
-    # ${ZFS} get ${SNAPSHOT_PROPERTY_NAME} $fs
-    command = "zfs get " + property + " " + filesystem
-    output = [line.split()[2] for line in runCommand(command).readlines()[1:]]
-    return "true" == "".join(output)
+def getProperty(filesystem, property):
+    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_GET_PROPERTY(property, filesystem))
+    if returncode > 0:
+        logging.error("Failed to retrieve property %s from %s", property, filesystem)
+    return stdoutdata.strip()
 
 def getSnapshots(filesystem):
-    #${ZFS} list -t snapshot -o name,creation -s creation -r ${fs} | cut -d' ' -f1 | ${TAIL} -n 1 | grep "${fs}@${pool}" | tr '\n' ' '
-    command = "zfs list -t snapshot -o name -s creation -r "+filesystem
-    snapshots = [line.split()[0] for line in runCommand(command).readlines()[1:]]
+    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_LIST_SNAPSHOTS(filesystem, options.pretend))
+    if returncode > 0:
+        logging.error("could not get snapshots for %s: %s", filesystem, stderrdata)
+        return []
+    snapshots = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
     return snapshots[::-1]
 
 def createFilesystem(pool, filesystem):
@@ -120,20 +165,23 @@ def createFilesystem(pool, filesystem):
         path = "/".join(paths[:i])
         if pool + "/" + path not in filesystems:
             logging.info("creating filesystem %s on pool %s", path, pool)
-            runCommand("zfs create " + pool + "/" + path, options.pretend)
+            (stdoutdata, stderrdata, returncode) = runCommand("zfs create " + pool + "/" + path, options.pretend)
+            if returncode > 0:
+                logging.error("Failed to create filesystem %s/%s: %s", pool, path, stderrdata)
+                break
 
 def runCommand(command, pretend=False):
     if pretend:
         logging.info("running command: %s", command)
+        return ("", "", 0)
     else:
         args = shlex.split(command)
         process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         (stdoutdata, stderrdata) = process.communicate()
         if process.returncode != 0:
             logging.error("could not execute command %s: error: %s returncode: %s", command, stderrdata, process.returncode)
-            exit(1)
-        else:
-            return StringIO.StringIO(stdoutdata)
+
+        return (stdoutdata, stderrdata, process.returncode)
 
 def pipeCommands(command1, command2, pretend=False):
     if pretend:
@@ -146,7 +194,8 @@ def pipeCommands(command1, command2, pretend=False):
         (stdoutdata, stderrdata) = process2.communicate()
         if process2.returncode != 0:
             logging.error("could not execute command %s: error: %s returncode: %s", command2, stderrdata, process2.returncode)
-            exit(1)    
+            return 1
+        return 0    
 
 if __name__ == "__main__":
     main()
