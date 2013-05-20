@@ -6,6 +6,7 @@ import subprocess
 import StringIO
 import shlex
 import logging
+import errno
 from datetime import datetime, timedelta
 
 # property used to check if auto updates should be made or not
@@ -88,6 +89,10 @@ def main():
     backupPools = list(set(allPools).intersection( set(options.backup) ))
     logger.debug("available backup pools: %s", " ".join(backupPools))
 
+    if not backupPools:
+        logger.info("No backup pools available, exiting...")
+        exit
+
     pools = [x for x in allPools if x not in backupPools]
     if options.pools:
         pools = [x for x in pools if x in options.pools]
@@ -103,9 +108,12 @@ def backup(pools, backupPools):
             filesystems = [fs for fs in getFilesystems(pool) if getProperty(fs, SNAPSHOT_PROPERTY_NAME)=="true"]
             logger.debug("filesystems to backup to %s: %s", backupPool, " ".join(filesystems))
             for fs in filesystems:
-                createFilesystem(backupPool, fs)
+                returncode = createFilesystem(backupPool, fs)
+                if returncode > 0:
+                    continue
                 snapshots = [s for s in getSnapshots(fs) if backupPool in s]
                 newSnapshot = createSnapshot(fs, LABEL(backupPool, DATE))
+                success = False
                 if not newSnapshot:
                     continue
                 if not snapshots:
@@ -120,8 +128,14 @@ def backup(pools, backupPools):
                             holdSnapshot(snapshot, False)
                             destroySnapshot(snapshot)
                             break
+                        elif returncode == 2:
+                            break
                 if success:
                     holdSnapshot(newSnapshot)
+                    if options.destroy:
+                        # keep last two snapshots on backup pool
+                        for snapshot in getSnapshots(backupPool + "/" +fs)[2:]:
+                            destroySnapshot(snapshot)
                 else:
                     if options.destroy:
                         destroySnapshot(newSnapshot)
@@ -137,12 +151,12 @@ def doBackup(destPool, filesystem, snapshot):
         logger.error("Size of %s stream (%s) exceeds size of pool %s (%s)", snapshot, size(streamSize), destPool, size(poolSize))
         return 1
     
-    logger.info("creating initial backup of %s to %s", snapshot, destPool)
+    logger.debug("creating initial backup of %s to %s", snapshot, destPool)
     start = datetime.now()
-    (stdoutdata, stderrdata, returncode) = pipeCommands(ZFS_SEND(snapshot), ZFS_RECEIVE(destPool, filesystem), options.pretend)
+    (stdoutdata, returncode) = pipeCommands(ZFS_SEND(snapshot), ZFS_RECEIVE(destPool, filesystem), options.pretend)
     stop = datetime.now()
     if returncode > 0:
-        logger.error("Failed to do initial backup of %s@%s to %s: %s", filesystem, snapshot, destPool, stderrdata)
+        logger.error("Failed to do initial backup of %s@%s to %s: %s", filesystem, snapshot, destPool, stdoutdata)
         return 1
     else:
         delta = datetime.now() - start
@@ -150,18 +164,18 @@ def doBackup(destPool, filesystem, snapshot):
         return 0
 
 def doIncrementalBackup(destPool, filesystem, newSnapshot, snapshot):
-    streamSize = getStreamSize(snapshot)
+    streamSize = getStreamSize(newSnapshot, snapshot)
     poolSize = getFreeSpace(destPool)
 
     if streamSize > poolSize:
         logger.error("Size of %s stream (%s) exceeds size of pool %s (%s)", snapshot, size(streamSize), destPool,  size(poolSize))
-        return 1
+        return 2
 
-    logger.info("creating incremental backup of %s to %s based on %s", newSnapshot, destPool, snapshot)
+    logger.debug("creating incremental backup of %s to %s based on %s", newSnapshot, destPool, snapshot)
     start = datetime.now()
-    (stdoutdata, stderrdata, returncode) = pipeCommands(ZFS_SEND_INCREMENTAL(snapshot, newSnapshot), ZFS_RECEIVE(destPool, filesystem), options.pretend)
+    (stdoutdata, returncode) = pipeCommands(ZFS_SEND_INCREMENTAL(snapshot, newSnapshot), ZFS_RECEIVE(destPool, filesystem), options.pretend)
     if returncode > 0:
-        logger.error("Failed to do incremental backup of %s@%s to %s based on %s: %s", filesystem, snapshot, destPool, newSnapshot, stderrdata)
+        logger.error("Failed to do incremental backup of %s@%s to %s based on %s: %s", filesystem, snapshot, destPool, newSnapshot, stdoutdata)
         return 1
     else:
         delta = datetime.now() - start
@@ -183,7 +197,7 @@ def holdSnapshot(snapshot, hold=True):
             logger.debug("Released snapshot %s", snapshot)
 
 def destroySnapshot(snapshot):
-    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_KEEP_SNAPSHOT(snapshot), options.pretend)
+    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_DESTROY_SNAPSHOT(snapshot), options.pretend)
     if returncode > 0:
         logger.error("Failed to destroy snapshot %s: %s", snapshot, stderrdata)
     else:
@@ -272,14 +286,15 @@ def getSnapshots(filesystem):
 def createFilesystem(pool, filesystem):
     filesystems = getFilesystems(pool)
     paths = filesystem.split("/")
-    for i in range(1, len(paths)+1):
+    for i in range(1, len(paths)):
         path = "/".join(paths[:i])
         if pool + "/" + path not in filesystems:
             logger.info("creating filesystem %s/%s", pool, path)
             (stdoutdata, stderrdata, returncode) = runCommand(ZFS_CREATE(pool, path), options.pretend)
             if returncode > 0:
                 logger.error("Failed to create filesystem %s/%s: %s", pool, path, stderrdata)
-                break
+                return 1
+    return 0
 
 def runCommand(command, pretend=False):
     if pretend:
@@ -296,12 +311,14 @@ def pipeCommands(command1, command2, pretend=False):
         logger.info("running command: %s | %s", command1, command2)
         return ("", "", 0)
     else:
-        args1 = shlex.split(command1)
-        args2 = shlex.split(command1)
-        process1 = subprocess.Popen(args1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        process2 = subprocess.Popen(args2, stdin=process1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (stdoutdata, stderrdata) = process2.communicate()
-        return (stdoutdata, stderrdata, process2.returncode)    
+        returncode = 0
+        try:
+            stdoutdata = subprocess.check_output(command1 + " | " + command2 , stderr=subprocess.STDOUT, shell=True)
+        except subprocess.CalledProcessError as e:
+            stderrdata = e.output
+            returncode = e.returncode
+            return (e.output, e.returncode)
+        return (stdoutdata, returncode)    
 
 def size(num):
     for x in ['bytes','KB','MB','GB']:
