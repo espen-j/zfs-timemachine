@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env /usr/local/bin/python
 
 import optparse
 import argparse
@@ -18,8 +18,8 @@ DATE = datetime.now().strftime("%Y%m%d%H%M")
 LABEL = "{}_{}".format
 
 ZPOOL_LIST = "/sbin/zpool list -H -o name"
-ZPOOL_IMPORT = "sudo /sbin/zpool import {}".format
-ZPOOL_EXPORT = "sudo /sbin/zpool export {}".format
+ZPOOL_IMPORT = "/usr/local/bin/sudo /sbin/zpool import {}".format
+ZPOOL_EXPORT = "/usr/local/bin/sudo /sbin/zpool export {}".format
 
 ZFS_LIST_FILESYSTEMS = "/sbin/zfs list -H -r -o name {}".format
 ZFS_LIST_SNAPSHOTS = "/sbin/zfs list -H -t snapshot -o name -s creation -r {}".format
