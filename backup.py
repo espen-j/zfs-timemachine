@@ -18,7 +18,9 @@ DATE = datetime.now().strftime("%Y%m%d%H%M")
 LABEL = "{}_{}".format
 
 ZPOOL_LIST = "/sbin/zpool list -H -o name"
+ZPOOL_LIST_DEVICES = "zpool list -Hvo name {}".format
 ZPOOL_IMPORT = "/usr/local/bin/sudo /sbin/zpool import {}".format
+ZPOOL_IMPORT_PATH = "/usr/local/bin/sudo /sbin/zpool import -d {} {}".format
 ZPOOL_EXPORT = "/usr/local/bin/sudo /sbin/zpool export {}".format
 
 ZFS_LIST_FILESYSTEMS = "/sbin/zfs list -H -r -o name {}".format
@@ -52,7 +54,7 @@ def main():
                       help="whitespace separated list of backup pools")
     parser.add_argument('pools', nargs='*',
                       help="optional whitespace separated list of pools to backup")
-    parser.add_argument("-d", "--destroy", action="store_true", dest="destroy", default=False,
+    parser.add_argument("-x", "--destroy", action="store_true", dest="destroy", default=False,
                       help="destroy snapshots when not used anymore")
     parser.add_argument("-l", "--log", type=str, default="WARNING",
                       help="Available levels are CRITICAL (3), ERROR (2), WARNING (1), INFO (0), DEBUG (-1)")
@@ -60,6 +62,8 @@ def main():
                       help="logfile for output")
     parser.add_argument("-p", "--pretend", action="store_true", dest="pretend", default=False,
                       help="print actions instead of executing")
+    parser.add_argument("-d", "--device", type=str, dest="device", default=None,
+                      help="Only backup to pools on device. Must be single device pool.")
     options = parser.parse_args()
 
     try:
@@ -82,18 +86,36 @@ def main():
     logger.setLevel(loglevel)
     logger.addHandler(logHandler)
 
-    for pool in options.backup:
-        importPool(pool)
+    device = options.device
+    if device.startswith("/dev/"):
+        device = device[5:]
+    if device:
+        logger.debug("device: %s", device)
 
+    backupPools = []
     allPools = getPools()
-    backupPools = list(set(allPools).intersection( set(options.backup) ))
+
+    for backupPool in options.backup:
+        imported = False
+        if backupPool not in allPools:
+            imported = importPool(backupPool)
+            if not imported:
+                continue
+        if device:
+            if not all(dev==device for dev in getDevices(backupPool)):
+                if imported:
+                    exportPool(backupPool)
+                continue;
+        backupPools.append(backupPool)
+        allPools.append(backupPool)
+
     logger.debug("available backup pools: %s", " ".join(backupPools))
 
     if not backupPools:
         logger.info("No backup pools available, exiting...")
         exit
 
-    pools = [x for x in allPools if x not in backupPools]
+    pools = [x for x in allPools if x not in options.backup]
     if options.pools:
         pools = [x for x in pools if x in options.pools]
 
@@ -204,6 +226,8 @@ def destroySnapshot(snapshot):
         logger.debug("Destroyed snapshot %s", snapshot)
 
 def getFreeSpace(pool):
+    if options.pretend:
+        return 2
     (stdoutdata, stderrdata, returncode) = runCommand(ZFS_AVAILABLE_SPACE(pool))
     if returncode > 0:
         logger.error("Failed to get free space for %s", pool)
@@ -213,6 +237,8 @@ def getFreeSpace(pool):
 
 def getStreamSize(newSnapshot, snapshot=None):
     size = None
+    if options.pretend:
+        return 1
     if snapshot:
         (stdoutdata, stderrdata, returncode) = runCommand(ZFS_INCREMENTAL_STREAM_SIZE(snapshot, newSnapshot))
     else:
@@ -244,19 +270,33 @@ def getPools():
 
     return pools
 
-def importPool(pool):
+def importPool(pool, searchPath=None):
+    if searchPath:
+        (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_IMPORT_PATH(searchPath, pool))
     (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_IMPORT(pool))
     if returncode > 0:
-        logger.debug("could not import pool %s: %s", pool, stderrdata)
+        logger.debug("could not import pool %s: %s %s", pool, stderrdata, returncode)
+        return False
     else:
         logger.debug("%s imported", pool)
+        return True
 
 def exportPool(pool):   
-    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_EXPORT(pool), options.pretend)
+    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_EXPORT(pool))
     if returncode > 0:
         logger.debug("could not export pool %s: %s", pool, stderrdata)
     else:
         logger.debug("%s exported", pool)
+
+def getDevices(pool):
+    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_LIST_DEVICES(pool))
+    if returncode > 0:
+        logger.debug("could not get devices for %s: %s", pool, stderrdata)
+        return []
+    else:
+        devices = [line.split()[0] for line in StringIO.StringIO(stdoutdata).readlines()[1:]]
+        logger.debug("devices in %s: %s", pool, devices)
+        return devices
 
 def getFilesystems(pool):
     (stdoutdata, stderrdata, returncode) = runCommand(ZFS_LIST_FILESYSTEMS(pool))
@@ -309,7 +349,7 @@ def runCommand(command, pretend=False):
 def pipeCommands(command1, command2, pretend=False):
     if pretend:
         logger.info("running command: %s | %s", command1, command2)
-        return ("", "", 0)
+        return ("", 0)
     else:
         returncode = 0
         try:
