@@ -1,4 +1,4 @@
-#!/usr/bin/env /usr/local/bin/python
+#!/usr/bin/env /usr/local/bin/python2.7
 
 import optparse
 import argparse
