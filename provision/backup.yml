@@ -1,0 +1,26 @@
+- hosts: kummerkasten
+  tasks:
+    - group:
+        name: backup
+        gid: 1005
+        state: present
+    - user:
+        name: backup
+        groups: backup
+        uid: 1005
+        home: /mnt/backup
+        shell: /nonexistent
+    - copy:
+        src: ../backup.py
+        dest: /usr/local/bin/backup
+        mode: 0755
+    - copy:
+        src: files/etc/devd/backup.conf
+        dest: /usr/local/etc/devd/backup.conf
+        mode: 0644
+    - file:
+        path: /var/log/backup.log
+        owner: backup
+        group: backup
+        state: touch
+        mode: 0644
