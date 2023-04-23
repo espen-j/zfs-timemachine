@@ -51,37 +51,7 @@ $ zfs set ch.espen:backup=true <pool>/<fs>
 
 To not have to run this script as root, we will have to set some permissions for your backup user.
 
-Furthermore we will mark all filesystem we want to have backed up.
-
-### ZFS permissions for unprivileged user
-
-These permissions enable an unprivileged user to execute all actions the backup script uses:
-
-
-```
-$ zfs allow -u <user> create,mount,receive(,destroy) <backup-pool>
-$ zfs allow -u <user> snapshot,send,hold,release(,destroy,mount) <pool>
-```
-
-Note the privileges in the brackets: Those allow an unprivileged user to destroy old snapshots. 
-
-To enable destroying unused snapshots pass the -x argument to the backup script. It will always keep the two newest snapshots.
-
-*Note:* Giving permission to destroy snapshots will also grant permission to destroy a filesystem, so be careful!
-
-### Import and export permission
-
-Allow users to export and import the backup pools. There is no way to delegate this using ZFS permission, so either use 
-root or sudo. sudo is available from the ports tree.
-
-sudoers configuration:
-
-```
-$ cat /usr/local/etc/sudoers.d/zpool
-Cmnd_Alias    ZPOOL = /sbin/zpool import *, /sbin/zpool export *, !/sbin/zpool import ocean, !/sbin/zpool export ocean
-
-<user> ALL=(root) NOPASSWD: ZPOOL
-```
+Furthermore, we will mark all filesystem we want to have backed up.
 
 ## Automagically run the script
 
@@ -119,6 +89,36 @@ This will make the script run every sunday morning at 2:15. If none of the backu
 $ crontab -e
 #minute hour    mday    month   wday    command
 15      2       *       *       0       /home/backup/bin/backup -b   -l info -o /var/log/backup.log -x
+```
+
+## ZFS permissions for unprivileged user
+
+These permissions enable an unprivileged user to execute all actions the backup script uses:
+
+
+```
+$ zfs allow -u <user> create,mount,receive(,destroy) <backup-pool>
+$ zfs allow -u <user> snapshot,send,hold,release(,destroy,mount) <pool>
+```
+
+Note the privileges in the brackets: Those allow an unprivileged user to destroy old snapshots.
+
+To enable destroying unused snapshots pass the -x argument to the backup script. It will always keep the two newest snapshots.
+
+*Note:* Giving permission to destroy snapshots will also grant permission to destroy a filesystem, so be careful!
+
+### Import and export permission
+
+Allow users to export and import the backup pools. There is no way to delegate this using ZFS permission, so either use
+root or sudo. sudo is available from the ports tree.
+
+sudoers configuration:
+
+```
+$ cat /usr/local/etc/sudoers.d/zpool
+Cmnd_Alias    ZPOOL = /sbin/zpool import *, /sbin/zpool export *, !/sbin/zpool import ocean, !/sbin/zpool export ocean
+
+<user> ALL=(root) NOPASSWD: ZPOOL
 ```
 
 ## Notes
