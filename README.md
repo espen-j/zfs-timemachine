@@ -39,7 +39,7 @@ optional arguments:
 
 ## Setup
 
-This script has been used in production on FreeBSD 9.x up to 12.x. It needs python 2.7 and devd running.
+This script has been used in production on FreeBSD 9.x up to 13.x. It needs python 2.7 and devd running.
 
 ### Mark filesystems to backup
 
