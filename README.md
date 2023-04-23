@@ -87,19 +87,29 @@ Cmnd_Alias    ZPOOL = /sbin/zpool import *, /sbin/zpool export *, !/sbin/zpool i
 
 If you want to run the script, when you plug in your backup usb drive, you will have to configure a new devfs rule.
 
-Note: Use gpt labels only. something like (gpt/backup-pool-1|da[0-9]$) would make the script run twice, but fail once. It might also work with non-gpt-labels. Just don't mix them.
+**Note:** 
+Use gpt labels only. something like (gpt/backup-pool-1|da[0-9]$) would make the script run twice, but fail once. It might also work with non-gpt-labels. Just don't mix them.
 
 This example will backup the <pool> to one of the two backup-pools specified with <backup-pool-1> and <backup-pool-2>.
 
 ```
 $ cat /usr/local/etc/devd/backup.conf
-# automount USB storage devices
+# Execute backup script automatically when the configured disks are detected
 notify 20 {
-        match "system" "DEVFS";
+        match "system" "GEOM";
         match "type" "CREATE";
         match "cdev" "gpt/(wd-backup|lacie-backup)";
-        action "su backup -c '/home/backup/bin/backup -b lacie-backup wd-backup -l info -o /var/log/backup.log -d $cdev -x ocean'";
+        action "echo Running automated backup to device: $cdev >> /var/log/backup.log";
+        action "/usr/local/bin/backup -b lacie-backup wd-backup -l info -o /var/log/backup.log -d $cdev -x lake ocean";
 };
+```
+
+**Note:**
+Careful with single quotes in the action: https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=240411
+Hence this wouldn't work:
+
+```
+action "su backup -c '/home/backup/bin/backup -b lacie-backup wd-backup -l info -o /var/log/backup.log -d $cdev -x ocean'";
 ```
 
 ## Run as Cronjob
