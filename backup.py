@@ -244,7 +244,7 @@ def get_free_space(pool):
         logger.error("Failed to get free space for %s", pool)
         return None
     else:
-        return long(data)
+        return int(data)
 
 
 def get_stream_size(new_snapshot, snapshot=None):
@@ -261,7 +261,7 @@ def get_stream_size(new_snapshot, snapshot=None):
         output = data if data else err_data
         calc_size = "".join([line.split()[1] for line in io.StringIO(output).readlines()[1:]])
 
-    return long(calc_size)
+    return int(calc_size)
 
 
 def create_snapshot(fs, name):
