@@ -1,13 +1,11 @@
 #!/usr/bin/env /usr/local/bin/python3.9
 
-import optparse
 import argparse
-import subprocess
-import StringIO
-import shlex
+import io
 import logging
-import errno
-from datetime import datetime, timedelta
+import shlex
+import subprocess
+from datetime import datetime
 
 # property used to check if auto updates should be made or not
 SNAPSHOT_PROPERTY_NAME = "ch.espen:backup"
@@ -260,7 +258,7 @@ def getStreamSize(newSnapshot, snapshot=None):
         logger.error("Failed to get stream size for %s: %s", newSnapshot, stderrdata)
     else:
         output = stdoutdata if stdoutdata else stderrdata
-        size = "".join([line.split()[1] for line in StringIO.StringIO(output).readlines()[1:]])
+        size = "".join([line.split()[1] for line in io.StringIO(output).readlines()[1:]])
 
     return long(size)
 
@@ -280,7 +278,7 @@ def getPools():
     (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_LIST)
     if returncode > 0:
         logger.error("Failed to retrieve pools: %s", stderrdata)
-    pools = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
+    pools = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
     logger.debug("available pools: %s", " ".join(pools))
 
     return pools
@@ -312,19 +310,19 @@ def getDevices(pool):
         logger.debug("could not get devices for %s: %s", pool, stderrdata)
         return []
     else:
-        devices = [line.split()[0] for line in StringIO.StringIO(stdoutdata).readlines()[1:]]
+        devices = [line.split()[0] for line in io.StringIO(stdoutdata).readlines()[1:]]
         logger.debug("devices in %s: %s", pool, devices)
         return devices
 
 
 def getFilesystems(pool):
     (stdoutdata, stderrdata, returncode) = runCommand(ZFS_LIST_FILESYSTEMS(pool))
-    filesystems = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
+    filesystems = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
     if returncode > 0:
         logger.error("could not get filesystems for %s", pool)
         return []
     else:
-        filesystems = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
+        filesystems = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
         logger.debug("filesystems in pool %s: %s", pool, " ".join(filesystems))
         return filesystems
 
@@ -341,7 +339,7 @@ def getSnapshots(filesystem):
     if returncode > 0:
         logger.error("could not get snapshots for %s: %s", filesystem, stderrdata)
         return []
-    snapshots = [line.strip() for line in StringIO.StringIO(stdoutdata).readlines()]
+    snapshots = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
     return snapshots[::-1]
 
 
