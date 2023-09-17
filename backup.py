@@ -46,7 +46,6 @@ global logger
 def main():
     global options
     global logger
-    usage = "usage: %prog [options]"
     parser = argparse.ArgumentParser(description='Process benchmarks.')
 
     parser.add_argument("-b", "--backup", default=[], type=str, nargs='+', required=True,
@@ -76,14 +75,14 @@ def main():
                     }[int(options.log)]
 
     if options.logfile:
-        logHandler = logging.FileHandler(options.logfile)
+        log_handler = logging.FileHandler(options.logfile)
     else:
-        logHandler = logging.StreamHandler()
+        log_handler = logging.StreamHandler()
 
-    logHandler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    log_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     logger = logging.getLogger(__file__)
     logger.setLevel(loglevel)
-    logger.addHandler(logHandler)
+    logger.addHandler(log_handler)
 
     device = options.device
     if device.startswith("/dev/"):
@@ -91,301 +90,301 @@ def main():
     if device:
         logger.debug("device: %s", device)
 
-    backupPools = []
-    allPools = getPools()
+    backup_pools = []
+    all_pools = get_pools()
 
     for backupPool in options.backup:
         imported = False
-        if backupPool not in allPools:
-            imported = importPool(backupPool)
+        if backupPool not in all_pools:
+            imported = import_pool(backupPool)
             if not imported:
                 continue
         if device:
-            if not all(dev == device for dev in getDevices(backupPool)):
+            if not all(dev == device for dev in get_devices(backupPool)):
                 if imported:
-                    exportPool(backupPool)
-                continue;
-        backupPools.append(backupPool)
-        allPools.append(backupPool)
+                    export_pool(backupPool)
+                continue
+        backup_pools.append(backupPool)
+        all_pools.append(backupPool)
 
-    logger.debug("available backup pools: %s", " ".join(backupPools))
+    logger.debug("available backup pools: %s", " ".join(backup_pools))
 
-    if not backupPools:
+    if not backup_pools:
         logger.info("No backup pools available, exiting...")
-        exit
+        exit()
 
-    pools = [x for x in allPools if x not in options.backup]
+    pools = [x for x in all_pools if x not in options.backup]
     if options.pools:
         pools = [x for x in pools if x in options.pools]
 
     logger.debug("pools to backup: %s", " ".join(pools))
 
-    backup(pools, backupPools)
+    backup(pools, backup_pools)
 
 
-def backup(pools, backupPools):
-    for backupPool in backupPools:
+def backup(pools, backup_pools):
+    for backupPool in backup_pools:
 
         for pool in pools:
-            filesystems = [fs for fs in getFilesystems(pool) if getProperty(fs, SNAPSHOT_PROPERTY_NAME) == "true"]
+            filesystems = [fs for fs in get_filesystems(pool) if get_property(fs, SNAPSHOT_PROPERTY_NAME) == "true"]
             logger.debug("filesystems to backup to %s: %s", backupPool, " ".join(filesystems))
             for fs in filesystems:
-                returncode = createFilesystem(backupPool, fs)
-                if returncode > 0:
+                return_code = create_filesystem(backupPool, fs)
+                if return_code > 0:
                     continue
-                snapshots = [s for s in getSnapshots(fs) if backupPool in s]
-                newSnapshot = createSnapshot(fs, LABEL(backupPool, DATE))
+                snapshots = [s for s in get_snapshots(fs) if backupPool in s]
+                new_snapshot = create_snapshot(fs, LABEL(backupPool, DATE))
                 success = False
-                if not newSnapshot:
+                if not new_snapshot:
                     continue
                 if not snapshots:
-                    returncode = doBackup(backupPool, fs, newSnapshot)
-                    if returncode == 0:
+                    return_code = do_backup(backupPool, fs, new_snapshot)
+                    if return_code == 0:
                         success = True
                 else:
                     for snapshot in snapshots:
-                        returncode = doIncrementalBackup(backupPool, fs, newSnapshot, snapshot)
-                        if returncode == 0:
+                        return_code = do_incremental_backup(backupPool, fs, new_snapshot, snapshot)
+                        if return_code == 0:
                             success = True
-                            holdSnapshot(snapshot, False)
-                            destroySnapshot(snapshot)
+                            hold_snapshot(snapshot, False)
+                            destroy_snapshot(snapshot)
                             break
-                        elif returncode == 2:
+                        elif return_code == 2:
                             break
                 if success:
-                    holdSnapshot(newSnapshot)
+                    hold_snapshot(new_snapshot)
                     if options.destroy:
                         # keep last two snapshots on backup pool
-                        for snapshot in getSnapshots(backupPool + "/" + fs)[2:]:
-                            destroySnapshot(snapshot)
+                        for snapshot in get_snapshots(backupPool + "/" + fs)[2:]:
+                            destroy_snapshot(snapshot)
                 else:
                     if options.destroy:
-                        destroySnapshot(newSnapshot)
+                        destroy_snapshot(new_snapshot)
 
-        exportPool(backupPool)
+        export_pool(backupPool)
 
 
-def doBackup(destPool, filesystem, snapshot):
-    streamSize = getStreamSize(snapshot)
-    poolSize = getFreeSpace(destPool)
+def do_backup(destination_pool, filesystem, snapshot):
+    stream_size = get_stream_size(snapshot)
+    pool_size = get_free_space(destination_pool)
 
-    if streamSize > poolSize:
-        logger.error("Size of %s stream (%s) exceeds size of pool %s (%s)", snapshot, size(streamSize), destPool,
-                     size(poolSize))
+    if stream_size > pool_size:
+        logger.error("Size of %s stream (%s) exceeds size of pool %s (%s)", snapshot, size(stream_size),
+                     destination_pool,
+                     size(pool_size))
         return 1
 
-    logger.debug("creating initial backup of %s to %s", snapshot, destPool)
+    logger.debug("creating initial backup of %s to %s", snapshot, destination_pool)
     start = datetime.now()
-    (stdoutdata, returncode) = pipeCommands(ZFS_SEND(snapshot), ZFS_RECEIVE(destPool, filesystem), options.pretend)
-    stop = datetime.now()
-    if returncode > 0:
-        logger.error("Failed to do initial backup of %s@%s to %s: %s", filesystem, snapshot, destPool, stdoutdata)
+    (data, return_code) = pipe_commands(ZFS_SEND(snapshot), ZFS_RECEIVE(destination_pool, filesystem), options.pretend)
+    if return_code > 0:
+        logger.error("Failed to do initial backup of %s@%s to %s: %s", filesystem, snapshot, destination_pool, data)
         return 1
     else:
         delta = datetime.now() - start
-        logger.info("Initial backup of %s to %s successful in %s, size %s", filesystem, destPool, delta,
-                    size(streamSize))
+        logger.info("Initial backup of %s to %s successful in %s, size %s", filesystem, destination_pool, delta,
+                    size(stream_size))
         return 0
 
 
-def doIncrementalBackup(destPool, filesystem, newSnapshot, snapshot):
-    streamSize = getStreamSize(newSnapshot, snapshot)
-    poolSize = getFreeSpace(destPool)
+def do_incremental_backup(destination_pool, filesystem, new_snapshot, snapshot):
+    stream_size = get_stream_size(new_snapshot, snapshot)
+    pool_size = get_free_space(destination_pool)
 
-    if streamSize > poolSize:
-        logger.error("Size of %s stream (%s) exceeds size of pool %s (%s)", snapshot, size(streamSize), destPool,
-                     size(poolSize))
+    if stream_size > pool_size:
+        logger.error("Size of %s stream (%s) exceeds size of pool %s (%s)", snapshot, size(stream_size),
+                     destination_pool,
+                     size(pool_size))
         return 2
 
-    logger.debug("creating incremental backup of %s to %s based on %s", newSnapshot, destPool, snapshot)
+    logger.debug("creating incremental backup of %s to %s based on %s", new_snapshot, destination_pool, snapshot)
     start = datetime.now()
-    (stdoutdata, returncode) = pipeCommands(ZFS_SEND_INCREMENTAL(snapshot, newSnapshot),
-                                            ZFS_RECEIVE(destPool, filesystem), options.pretend)
-    if returncode > 0:
-        logger.error("Failed to do incremental backup of %s@%s to %s based on %s: %s", filesystem, snapshot, destPool,
-                     newSnapshot, stdoutdata)
+    (data, return_code) = pipe_commands(ZFS_SEND_INCREMENTAL(snapshot, new_snapshot),
+                                        ZFS_RECEIVE(destination_pool, filesystem), options.pretend)
+    if return_code > 0:
+        logger.error("Failed to do incremental backup of %s@%s to %s based on %s: %s", filesystem, snapshot,
+                     destination_pool,
+                     new_snapshot, data)
         return 1
     else:
         delta = datetime.now() - start
-        logger.info("Incremental backup of %s to %s successful in %s, size %s", filesystem, destPool, delta,
-                    size(streamSize))
+        logger.info("Incremental backup of %s to %s successful in %s, size %s", filesystem, destination_pool, delta,
+                    size(stream_size))
         return 0
 
 
-def holdSnapshot(snapshot, hold=True):
+def hold_snapshot(snapshot, hold=True):
     if hold:
-        (stdoutdata, stderrdata, returncode) = runCommand(ZFS_KEEP_SNAPSHOT(snapshot))
-        if returncode > 0:
-            logger.error("Failed to hold snapshot %s: %s", snapshot, stderrdata)
+        (data, err_data, return_code) = run_command(ZFS_KEEP_SNAPSHOT(snapshot))
+        if return_code > 0:
+            logger.error("Failed to hold snapshot %s: %s", snapshot, err_data)
         else:
             logger.debug("Holding snapshot %s", snapshot)
     else:
-        (stdoutdata, stderrdata, returncode) = runCommand(ZFS_RELEASE_SNAPSHOT(snapshot))
-        if returncode > 0:
-            logger.error("Failed to release snapshot %s: %s", snapshot, stderrdata)
+        (data, err_data, return_code) = run_command(ZFS_RELEASE_SNAPSHOT(snapshot))
+        if return_code > 0:
+            logger.error("Failed to release snapshot %s: %s", snapshot, err_data)
         else:
             logger.debug("Released snapshot %s", snapshot)
 
 
-def destroySnapshot(snapshot):
-    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_DESTROY_SNAPSHOT(snapshot), options.pretend)
-    if returncode > 0:
-        logger.error("Failed to destroy snapshot %s: %s", snapshot, stderrdata)
+def destroy_snapshot(snapshot):
+    (data, err_data, return_code) = run_command(ZFS_DESTROY_SNAPSHOT(snapshot), options.pretend)
+    if return_code > 0:
+        logger.error("Failed to destroy snapshot %s: %s", snapshot, err_data)
     else:
         logger.debug("Destroyed snapshot %s", snapshot)
 
 
-def getFreeSpace(pool):
+def get_free_space(pool):
     if options.pretend:
         return 2
-    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_AVAILABLE_SPACE(pool))
-    if returncode > 0:
+    (data, err_data, return_code) = run_command(ZFS_AVAILABLE_SPACE(pool))
+    if return_code > 0:
         logger.error("Failed to get free space for %s", pool)
         return None
     else:
-        return long(stdoutdata)
+        return long(data)
 
 
-def getStreamSize(newSnapshot, snapshot=None):
-    size = None
+def get_stream_size(new_snapshot, snapshot=None):
+    calc_size = None
     if options.pretend:
         return 1
     if snapshot:
-        (stdoutdata, stderrdata, returncode) = runCommand(ZFS_INCREMENTAL_STREAM_SIZE(snapshot, newSnapshot))
+        (data, err_data, return_code) = run_command(ZFS_INCREMENTAL_STREAM_SIZE(snapshot, new_snapshot))
     else:
-        (stdoutdata, stderrdata, returncode) = runCommand(ZFS_STREAM_SIZE(newSnapshot))
-    if returncode > 0:
-        logger.error("Failed to get stream size for %s: %s", newSnapshot, stderrdata)
+        (data, err_data, return_code) = run_command(ZFS_STREAM_SIZE(new_snapshot))
+    if return_code > 0:
+        logger.error("Failed to get stream size for %s: %s", new_snapshot, err_data)
     else:
-        output = stdoutdata if stdoutdata else stderrdata
-        size = "".join([line.split()[1] for line in io.StringIO(output).readlines()[1:]])
+        output = data if data else err_data
+        calc_size = "".join([line.split()[1] for line in io.StringIO(output).readlines()[1:]])
 
-    return long(size)
+    return long(calc_size)
 
 
-def createSnapshot(fs, name):
+def create_snapshot(fs, name):
     logger.debug("creating snapshot for %s", fs)
     snapshot = ZFS_SNAPSHOT(fs, name)
-    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_CREATE_SNAPSHOT(snapshot), options.pretend)
-    if returncode > 0:
-        logger.error("Failed to create snapshot %s: %s", snapshot, stderrdata)
+    (data, err_data, return_code) = run_command(ZFS_CREATE_SNAPSHOT(snapshot), options.pretend)
+    if return_code > 0:
+        logger.error("Failed to create snapshot %s: %s", snapshot, err_data)
         return None
     else:
         return snapshot
 
 
-def getPools():
-    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_LIST)
-    if returncode > 0:
-        logger.error("Failed to retrieve pools: %s", stderrdata)
-    pools = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
+def get_pools():
+    (data, err_data, return_code) = run_command(ZPOOL_LIST)
+    if return_code > 0:
+        logger.error("Failed to retrieve pools: %s", err_data)
+    pools = [line.strip() for line in io.StringIO(data).readlines()]
     logger.debug("available pools: %s", " ".join(pools))
 
     return pools
 
 
-def importPool(pool, searchPath=None):
-    if searchPath:
-        (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_IMPORT_PATH(searchPath, pool))
-    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_IMPORT(pool))
-    if returncode > 0:
-        logger.debug("could not import pool %s: %s %s", pool, stderrdata, returncode)
+def import_pool(pool, search_path=None):
+    if search_path:
+        (data, err_data, return_code) = run_command(ZPOOL_IMPORT_PATH(search_path, pool))
+    else:
+        (data, err_data, return_code) = run_command(ZPOOL_IMPORT(pool))
+    if return_code > 0:
+        logger.debug("could not import pool %s: %s %s", pool, err_data, return_code)
         return False
     else:
         logger.debug("%s imported", pool)
         return True
 
 
-def exportPool(pool):
-    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_EXPORT(pool))
-    if returncode > 0:
-        logger.debug("could not export pool %s: %s", pool, stderrdata)
+def export_pool(pool):
+    (data, err_data, return_code) = run_command(ZPOOL_EXPORT(pool))
+    if return_code > 0:
+        logger.debug("could not export pool %s: %s", pool, err_data)
     else:
         logger.debug("%s exported", pool)
 
 
-def getDevices(pool):
-    (stdoutdata, stderrdata, returncode) = runCommand(ZPOOL_LIST_DEVICES(pool))
-    if returncode > 0:
-        logger.debug("could not get devices for %s: %s", pool, stderrdata)
+def get_devices(pool):
+    (data, err_data, return_code) = run_command(ZPOOL_LIST_DEVICES(pool))
+    if return_code > 0:
+        logger.debug("could not get devices for %s: %s", pool, err_data)
         return []
     else:
-        devices = [line.split()[0] for line in io.StringIO(stdoutdata).readlines()[1:]]
+        devices = [line.split()[0] for line in io.StringIO(data).readlines()[1:]]
         logger.debug("devices in %s: %s", pool, devices)
         return devices
 
 
-def getFilesystems(pool):
-    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_LIST_FILESYSTEMS(pool))
-    filesystems = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
-    if returncode > 0:
+def get_filesystems(pool):
+    (data, err_data, return_code) = run_command(ZFS_LIST_FILESYSTEMS(pool))
+    if return_code > 0:
         logger.error("could not get filesystems for %s", pool)
         return []
     else:
-        filesystems = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
+        filesystems = [line.strip() for line in io.StringIO(data).readlines()]
         logger.debug("filesystems in pool %s: %s", pool, " ".join(filesystems))
         return filesystems
 
 
-def getProperty(filesystem, property):
-    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_GET_PROPERTY(property, filesystem))
-    if returncode > 0:
-        logger.error("Failed to retrieve property %s from %s", property, filesystem)
-    return stdoutdata.strip()
+def get_property(filesystem, zfs_property):
+    (data, err_data, return_code) = run_command(ZFS_GET_PROPERTY(zfs_property, filesystem))
+    if return_code > 0:
+        logger.error("Failed to retrieve property %s from %s", zfs_property, filesystem)
+    return data.strip()
 
 
-def getSnapshots(filesystem):
-    (stdoutdata, stderrdata, returncode) = runCommand(ZFS_LIST_SNAPSHOTS(filesystem, options.pretend))
-    if returncode > 0:
-        logger.error("could not get snapshots for %s: %s", filesystem, stderrdata)
+def get_snapshots(filesystem):
+    (data, err_data, return_code) = run_command(ZFS_LIST_SNAPSHOTS(filesystem, options.pretend))
+    if return_code > 0:
+        logger.error("could not get snapshots for %s: %s", filesystem, err_data)
         return []
-    snapshots = [line.strip() for line in io.StringIO(stdoutdata).readlines()]
+    snapshots = [line.strip() for line in io.StringIO(data).readlines()]
     return snapshots[::-1]
 
 
-def createFilesystem(pool, filesystem):
-    filesystems = getFilesystems(pool)
+def create_filesystem(pool, filesystem):
+    filesystems = get_filesystems(pool)
     paths = filesystem.split("/")
     for i in range(1, len(paths)):
         path = "/".join(paths[:i])
         if pool + "/" + path not in filesystems:
             logger.info("creating filesystem %s/%s", pool, path)
-            (stdoutdata, stderrdata, returncode) = runCommand(ZFS_CREATE(pool, path), options.pretend)
-            if returncode > 0:
-                logger.error("Failed to create filesystem %s/%s: %s", pool, path, stderrdata)
+            (data, err_data, return_code) = run_command(ZFS_CREATE(pool, path), options.pretend)
+            if return_code > 0:
+                logger.error("Failed to create filesystem %s/%s: %s", pool, path, err_data)
                 return 1
     return 0
 
 
-def runCommand(command, pretend=False):
+def run_command(command, pretend=False):
     if pretend:
         logger.info("running command: %s", command)
-        return ("", "", 0)
+        return "", "", 0
     else:
         args = shlex.split(command)
         process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (stdoutdata, stderrdata) = process.communicate()
-        return (stdoutdata, stderrdata, process.returncode)
+        (data, err_data) = process.communicate()
+        return data, err_data, process.returncode
 
 
-def pipeCommands(command1, command2, pretend=False):
+def pipe_commands(command1, command2, pretend=False):
     if pretend:
         logger.info("running command: %s | %s", command1, command2)
-        return ("", 0)
+        return "", 0
     else:
-        returncode = 0
+        return_code = 0
         try:
-            stdoutdata = subprocess.check_output(command1 + " | " + command2, stderr=subprocess.STDOUT, shell=True)
+            data = subprocess.check_output(command1 + " | " + command2, stderr=subprocess.STDOUT, shell=True)
         except subprocess.CalledProcessError as e:
-            stderrdata = e.output
-            returncode = e.returncode
-            return (e.output, e.returncode)
-        return (stdoutdata, returncode)
+            return e.output, e.returncode
+        return data, return_code
 
 
 def size(num):
     for x in ['bytes', 'KB', 'MB', 'GB']:
-        if num < 1024.0 and num > -1024.0:
+        if 1024.0 > num > -1024.0:
             return "%3.1f%s" % (num, x)
         num /= 1024.0
     return "%3.1f%s" % (num, 'TB')
