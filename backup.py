@@ -364,9 +364,8 @@ def run_command(command, pretend=False):
         return "", "", 0
     else:
         args = shlex.split(command)
-        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (data, err_data) = process.communicate()
-        return data, err_data, process.returncode
+        completed = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return completed.stdout, completed.stderr, completed.returncode
 
 
 def pipe_commands(command1, command2, pretend=False):
