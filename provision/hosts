@@ -1,2 +1,2 @@
 [kummerkasten]
-kummerkasten.netz ansible_user=root ansible_python_interpreter=/usr/local/bin/python3.6
+kummerkasten.netz ansible_user=root ansible_python_interpreter=/usr/local/bin/python3.9
