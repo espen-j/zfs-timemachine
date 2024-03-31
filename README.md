@@ -39,7 +39,7 @@ optional arguments:
 
 ## Setup
 
-This script has been used in production on FreeBSD 9.x up to 13.x. It needs python 3.9 and devd for automated disk detection.
+This script has been used in production on FreeBSD 9.x up to 14.x. It needs python 3.9 and devd for automated disk detection.
 
 ### Mark filesystems to backup
 
