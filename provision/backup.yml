@@ -1,5 +1,8 @@
 - hosts: kummerkasten
   tasks:
+    - pkgng:
+        name: python
+        state: latest
     - group:
         name: backup
         gid: 1005
