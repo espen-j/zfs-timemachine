@@ -135,3 +135,18 @@ $ zfs set mountpoint=none <backup-pool>
 
 Worst case you can manually force write a new backup to recover from this, but the script won't recover itself.
 
+## Debugging
+
+### devd
+
+To debug your `devd` rules, stop the service and run the daemon in debug mode: 
+```shell
+service devd stop
+devd -dn -f /etc/devd.conf
+```
+
+### Run script from CLI:
+
+```shell
+/usr/local/bin/backup -b wd-backup -l info -o /var/log/backup.log -d gpt/wd-backup >> /var/log/backup.log
+```
